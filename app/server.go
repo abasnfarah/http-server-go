@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	// Uncomment this block to pass the first stage
 	"net"
 	"os"
@@ -25,16 +26,48 @@ func main() {
 		os.Exit(1)
 	}
 
-  response := []byte("HTTP/1.1 200 OK\r\n\r\n")
-
   defer c.Close()
 
-  d, err := c.Write(response)
+  request := make([]byte, 1024)
+  d, err := c.Read(request)
+  fmt.Printf("READ: Number of bytes recieved: %d\n", d)
+  if err != nil {
+    fmt.Println("Error reading from connection: ", err.Error())
+    os.Exit(1)
+  }
+  fmt.Println("Received message: \r\n", string(request))
+
+  requestLines := strings.Split(string(request), "\r\n")
+
+  startLineSections := strings.Split(requestLines[0], " ")
+  HTTPMethod := startLineSections[0]
+  path := startLineSections[1]
+  HTTPVersion := startLineSections[2]
+
+  HTTPHeaders := requestLines[1:len(requestLines)-2]
+
+  fmt.Println("HTTP Method: ", HTTPMethod)
+  fmt.Println("Path: ", path)
+  fmt.Println("HTTP Version: ", HTTPVersion)
+  fmt.Println("HTTP Headers: ", HTTPHeaders)
+
+  for _, header := range HTTPHeaders {
+    fmt.Printf("Header: %s\n", header)
+  }
+  
+  successful := []byte("HTTP/1.1 200 OK\r\n\r\n")
+  unSuccessful := []byte("HTTP/1.1 404 Not Found\r\n\r\n")
+
+  if path != "/" {
+    d, err = c.Write(unSuccessful)
+  }else {
+    d, err = c.Write(successful)
+  }
+
   if err != nil {
     fmt.Println("Error writing to connection: ", err.Error())
     os.Exit(1)
   }
-
-  fmt.Printf("Received message: %d\n", d)
+  fmt.Printf("WRITE: Number of bytes sent: %d\n", d)
 
 }
