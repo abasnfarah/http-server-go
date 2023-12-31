@@ -1,10 +1,11 @@
 package http
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 type request struct {
@@ -22,6 +23,7 @@ type response struct {
 }
 
 type HTTP struct {
+	logger     *zap.Logger
 	Listener   net.Listener
 	Connection net.Conn
 	Request    request
@@ -29,7 +31,9 @@ type HTTP struct {
 }
 
 func NewHTTPServer() *HTTP {
-	return &HTTP{}
+	logger, _ := zap.NewProduction()
+	logger.Info("Starting HTTP Server")
+	return &HTTP{logger: logger}
 }
 
 func (h *HTTP) accept() {
@@ -55,20 +59,19 @@ func (h *HTTP) deserialize(request []byte) {
 		h.Request.HTTPHeaders = append(h.Request.HTTPHeaders, header)
 	}
 
-	fmt.Printf("Deserialized Request: %#v\n", h.Request)
+	h.logger.Info("Deserialized Request: ", zap.Any("request", h.Request))
 }
 
 func (h *HTTP) read() {
 	reqBuffer := make([]byte, 1024)
-	fmt.Println("Reading request...")
+	h.logger.Info("Reading request...")
 
 	d, err := h.Connection.Read(reqBuffer)
 	if err != nil {
-		fmt.Println("Error reading from connection: ", err.Error())
+		h.logger.Error("Error reading from connection: " + err.Error())
 		os.Exit(1)
 	}
-	fmt.Printf("READ: Number of bytes recieved: %d\n", d)
-	fmt.Println("Received message: \r\n", string(reqBuffer))
+	h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
 
 	h.deserialize(reqBuffer)
 }
@@ -80,17 +83,17 @@ func (h *HTTP) write() {
 	if h.Request.Path != "/" {
 		d, err := h.Connection.Write(unSuccessful)
 		if err != nil {
-			fmt.Println("Error writing to connection: ", err.Error())
+			h.logger.Error("Error writing to connection: " + err.Error())
 			os.Exit(1)
 		}
-		fmt.Printf("READ: Number of bytes recieved: %d\n", d)
+		h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
 	} else {
 		d, err := h.Connection.Write(successful)
 		if err != nil {
-			fmt.Println("Error writing to connection: ", err.Error())
+			h.logger.Error("Error writing to connection: " + err.Error())
 			os.Exit(1)
 		}
-		fmt.Printf("READ: Number of bytes recieved: %d\n", d)
+		h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
 	}
 
 }
@@ -98,7 +101,7 @@ func (h *HTTP) write() {
 func (h *HTTP) ServeRequests(ip string, port string) {
 	l, err := net.Listen("tcp", ip+":"+port)
 	if err != nil {
-		fmt.Println("Failed to bind to port ", port, err.Error())
+		h.logger.Error("Failed to bind to port " + port + err.Error())
 		os.Exit(1)
 	}
 
