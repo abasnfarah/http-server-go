@@ -22,6 +22,59 @@ type response struct {
 	Body        string
 }
 
+func parseHeaders(headers []string) string {
+	for _, header := range headers {
+		if strings.HasPrefix(header, "User-Agent") {
+			return header[len("User-Agent: "):]
+		}
+	}
+	return ""
+}
+
+func fetchResponse(request request) response {
+	successful := []byte("HTTP/1.1 200 OK")
+	unSuccessful := []byte("HTTP/1.1 404 Not Found")
+
+	var responseStartLine []byte
+	body := []byte("")
+	userAgent := ""
+
+	switch {
+	case request.Path == "/":
+		responseStartLine = successful
+
+	case strings.HasPrefix(request.Path, "/echo"):
+		responseStartLine = successful
+		body = []byte(request.Path[len("/echo"):])
+		if len(body) > 1 && body[0] == '/' {
+			body = body[1:]
+		} else {
+			body = []byte("")
+		}
+	case strings.HasPrefix(request.Path, "/user-agent"):
+		responseStartLine = successful
+		userAgent = parseHeaders(request.HTTPHeaders)
+		body = []byte(userAgent)
+
+	default:
+		responseStartLine = unSuccessful
+
+	}
+
+	var contentLengthString string
+	if len(body) > 0 {
+		contentLengthString = fmt.Sprint(len(body))
+	} else {
+		contentLengthString = "0"
+	}
+
+	return response{
+		Status:      string(responseStartLine),
+		Body:        string(body),
+		HTTPHeaders: []string{"Content-Type: text/plain", "Content-Length: " + contentLengthString},
+	}
+}
+
 type HTTP struct {
 	logger     *zap.Logger
 	Listener   net.Listener
@@ -62,48 +115,12 @@ func (h *HTTP) serializeRequest(request []byte) {
 	h.logger.Info("Deserialized Request: ", zap.Any("request", h.Request))
 }
 
-func (h *HTTP) serializeResponse() {
-	successful := []byte("HTTP/1.1 200 OK")
-	unSuccessful := []byte("HTTP/1.1 404 Not Found")
-	var responseStartLine []byte
-	body := []byte("")
-
-	switch {
-	case h.Request.Path == "/":
-		responseStartLine = successful
-
-	case strings.HasPrefix(h.Request.Path, "/echo"):
-		responseStartLine = successful
-		body = []byte(h.Request.Path[len("/echo"):])
-		if len(body) > 1 && body[0] == '/' {
-			body = body[1:]
-		} else {
-			body = []byte("")
-		}
-
-	default:
-		responseStartLine = unSuccessful
-
-	}
-
-	h.Response.Status = string(responseStartLine)
-	h.Response.Body = string(body)
-	h.Response.HTTPHeaders = append(h.Response.HTTPHeaders, "Content-Type: text/plain")
-
-	var contentLengthString string
-	if len(body) > 0 {
-		contentLengthString = fmt.Sprint(len(body))
-	} else {
-		contentLengthString = "0"
-	}
-
-	h.Response.HTTPHeaders = append(h.Response.HTTPHeaders, "Content-Length: "+contentLengthString)
-
+func (h *HTTP) serializeResponse(res response) {
+	h.Response = res
 	h.logger.Info("Serialized Response: ", zap.Any("response", h.Response))
 }
 
 func (h *HTTP) deserializeResponse() []byte {
-
 	response := h.Response.Status + "\r\n"
 
 	for _, header := range h.Response.HTTPHeaders {
@@ -129,7 +146,8 @@ func (h *HTTP) read() {
 	h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
 
 	h.serializeRequest(reqBuffer)
-	h.serializeResponse()
+	response := fetchResponse(h.Request)
+	h.serializeResponse(response)
 }
 
 func (h *HTTP) write() {
@@ -140,7 +158,6 @@ func (h *HTTP) write() {
 		os.Exit(1)
 	}
 	h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
-
 }
 
 func (h *HTTP) ServeRequests(ip string, port string) {
