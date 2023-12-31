@@ -160,6 +160,12 @@ func (h *HTTP) write() {
 	h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
 }
 
+func (h *HTTP) handeConnection() {
+  defer h.Connection.Close()
+  h.read()
+  h.write()
+}
+
 func (h *HTTP) ServeRequests(ip string, port string) {
 	l, err := net.Listen("tcp", ip+":"+port)
 	if err != nil {
@@ -168,10 +174,8 @@ func (h *HTTP) ServeRequests(ip string, port string) {
 	}
 
 	h.Listener = l
-	h.accept()
-
-	defer h.Connection.Close()
-
-	h.read()
-	h.write()
+  for {
+    h.accept()
+    go h.handeConnection()
+  }
 }
