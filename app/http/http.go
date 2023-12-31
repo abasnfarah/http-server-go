@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -16,10 +17,9 @@ type request struct {
 }
 
 type response struct {
-	HTTPMethod  string
-	Path        string
-	HTTPVersion string
+	Status      string
 	HTTPHeaders []string
+	Body        string
 }
 
 type HTTP struct {
@@ -45,7 +45,7 @@ func (h *HTTP) accept() {
 	h.Connection = c
 }
 
-func (h *HTTP) deserialize(request []byte) {
+func (h *HTTP) serializeRequest(request []byte) {
 	requestLine := strings.Split(string(request), "\r\n")
 	startLineSections := strings.Split(requestLine[0], " ")
 	h.Request.HTTPMethod = startLineSections[0]
@@ -62,6 +62,61 @@ func (h *HTTP) deserialize(request []byte) {
 	h.logger.Info("Deserialized Request: ", zap.Any("request", h.Request))
 }
 
+func (h *HTTP) serializeResponse() {
+	successful := []byte("HTTP/1.1 200 OK")
+	unSuccessful := []byte("HTTP/1.1 404 Not Found")
+	var responseStartLine []byte
+	body := []byte("")
+
+	switch {
+	case h.Request.Path == "/":
+		responseStartLine = successful
+
+	case strings.HasPrefix(h.Request.Path, "/echo"):
+		responseStartLine = successful
+		body = []byte(h.Request.Path[len("/echo"):])
+		if len(body) > 1 && body[0] == '/' {
+			body = body[1:]
+		} else {
+			body = []byte("")
+		}
+
+	default:
+		responseStartLine = unSuccessful
+
+	}
+
+	h.Response.Status = string(responseStartLine)
+	h.Response.Body = string(body)
+	h.Response.HTTPHeaders = append(h.Response.HTTPHeaders, "Content-Type: text/plain")
+
+	var contentLengthString string
+	if len(body) > 0 {
+		contentLengthString = fmt.Sprint(len(body))
+	} else {
+		contentLengthString = "0"
+	}
+
+	h.Response.HTTPHeaders = append(h.Response.HTTPHeaders, "Content-Length: "+contentLengthString)
+
+	h.logger.Info("Serialized Response: ", zap.Any("response", h.Response))
+}
+
+func (h *HTTP) deserializeResponse() []byte {
+
+	response := h.Response.Status + "\r\n"
+
+	for _, header := range h.Response.HTTPHeaders {
+		response += header + "\r\n"
+	}
+
+	response += "\r\n"
+	if len(h.Response.Body) > 0 {
+		response += h.Response.Body
+	}
+	return []byte(response)
+}
+
 func (h *HTTP) read() {
 	reqBuffer := make([]byte, 1024)
 	h.logger.Info("Reading request...")
@@ -73,28 +128,18 @@ func (h *HTTP) read() {
 	}
 	h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
 
-	h.deserialize(reqBuffer)
+	h.serializeRequest(reqBuffer)
+	h.serializeResponse()
 }
 
 func (h *HTTP) write() {
-	successful := []byte("HTTP/1.1 200 OK\r\n\r\n")
-	unSuccessful := []byte("HTTP/1.1 404 Not Found\r\n\r\n")
-
-	if h.Request.Path != "/" {
-		d, err := h.Connection.Write(unSuccessful)
-		if err != nil {
-			h.logger.Error("Error writing to connection: " + err.Error())
-			os.Exit(1)
-		}
-		h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
-	} else {
-		d, err := h.Connection.Write(successful)
-		if err != nil {
-			h.logger.Error("Error writing to connection: " + err.Error())
-			os.Exit(1)
-		}
-		h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
+	response := h.deserializeResponse()
+	d, err := h.Connection.Write(response)
+	if err != nil {
+		h.logger.Error("Error writing to connection: " + err.Error())
+		os.Exit(1)
 	}
+	h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
 
 }
 
