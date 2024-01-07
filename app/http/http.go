@@ -76,11 +76,8 @@ func fetchResponse(request request) response {
 }
 
 type HTTP struct {
-	logger     *zap.Logger
-	Listener   net.Listener
-	Connection net.Conn
-	Request    request
-	Response   response
+	logger   *zap.Logger
+	Listener net.Listener
 }
 
 func NewHTTPServer() *HTTP {
@@ -89,70 +86,54 @@ func NewHTTPServer() *HTTP {
 	return &HTTP{logger: logger}
 }
 
-func (h *HTTP) accept() {
-	c, err := h.Listener.Accept()
-	if err != nil {
-		os.Exit(1)
-	}
-
-	h.Connection = c
-}
-
-func (h *HTTP) serializeRequest(request []byte) {
-	requestLine := strings.Split(string(request), "\r\n")
+func (h *HTTP) deserializeRequest(reqBuffer []byte, req *request) {
+	requestLine := strings.Split(string(reqBuffer), "\r\n")
 	startLineSections := strings.Split(requestLine[0], " ")
-	h.Request.HTTPMethod = startLineSections[0]
-	h.Request.Path = startLineSections[1]
-	h.Request.HTTPVersion = startLineSections[2]
+	req.HTTPMethod = startLineSections[0]
+	req.Path = startLineSections[1]
+	req.HTTPVersion = startLineSections[2]
 
 	for _, header := range requestLine[1:] {
 		if header == "" {
 			break
 		}
-		h.Request.HTTPHeaders = append(h.Request.HTTPHeaders, header)
+		req.HTTPHeaders = append(req.HTTPHeaders, header)
 	}
 
-	h.logger.Info("Deserialized Request: ", zap.Any("request", h.Request))
+	h.logger.Info("Deserialized Request: ", zap.Any("request", req))
 }
 
-func (h *HTTP) serializeResponse(res response) {
-	h.Response = res
-	h.logger.Info("Serialized Response: ", zap.Any("response", h.Response))
-}
+func (h *HTTP) serializeResponse(res response) []byte {
+	response := res.Status + "\r\n"
 
-func (h *HTTP) deserializeResponse() []byte {
-	response := h.Response.Status + "\r\n"
-
-	for _, header := range h.Response.HTTPHeaders {
+	for _, header := range res.HTTPHeaders {
 		response += header + "\r\n"
 	}
 
 	response += "\r\n"
-	if len(h.Response.Body) > 0 {
-		response += h.Response.Body
+	if len(res.Body) > 0 {
+		response += res.Body
 	}
 	return []byte(response)
 }
 
-func (h *HTTP) read() {
+func (h *HTTP) read(conn net.Conn, request *request) {
 	reqBuffer := make([]byte, 1024)
 	h.logger.Info("Reading request...")
 
-	d, err := h.Connection.Read(reqBuffer)
+	d, err := conn.Read(reqBuffer)
 	if err != nil {
 		h.logger.Error("Error reading from connection: " + err.Error())
 		os.Exit(1)
 	}
 	h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
 
-	h.serializeRequest(reqBuffer)
-	response := fetchResponse(h.Request)
-	h.serializeResponse(response)
+	h.deserializeRequest(reqBuffer, request)
 }
 
-func (h *HTTP) write() {
-	response := h.deserializeResponse()
-	d, err := h.Connection.Write(response)
+func (h *HTTP) write(conn net.Conn, response response) {
+	resp := h.serializeResponse(response)
+	d, err := conn.Write(resp)
 	if err != nil {
 		h.logger.Error("Error writing to connection: " + err.Error())
 		os.Exit(1)
@@ -160,22 +141,34 @@ func (h *HTTP) write() {
 	h.logger.Info("READ: Number of bytes recieved: ", zap.Int("bytes", d))
 }
 
-func (h *HTTP) handeConnection() {
-  defer h.Connection.Close()
-  h.read()
-  h.write()
+func (h *HTTP) handleConnection(conn net.Conn) {
+	defer conn.Close()
+
+	var request request
+	var response response
+
+	h.read(conn, &request)
+	response = fetchResponse(request)
+	h.write(conn, response)
 }
 
 func (h *HTTP) ServeRequests(ip string, port string) {
 	l, err := net.Listen("tcp", ip+":"+port)
 	if err != nil {
-		h.logger.Error("Failed to bind to port " + port + err.Error())
+		h.logger.Error("Failed to bind to port " + port + ": " + err.Error())
 		os.Exit(1)
 	}
 
 	h.Listener = l
-  for {
-    h.accept()
-    go h.handeConnection()
-  }
+	for {
+		c, err := h.Listener.Accept()
+		if err != nil {
+			h.logger.Error("Error accepting connection: " + err.Error())
+			continue
+		}
+
+		h.logger.Info("Accepted connection", zap.String("remote", c.RemoteAddr().String()), zap.String("local", c.LocalAddr().String()))
+
+		go h.handleConnection(c)
+	}
 }
