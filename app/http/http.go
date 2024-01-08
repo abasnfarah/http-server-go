@@ -36,6 +36,8 @@ func fetchResponse(request request, dirFlag bool, directory string) response {
 	successful := []byte("HTTP/1.1 200 OK")
 	unSuccessful := []byte("HTTP/1.1 404 Not Found")
 
+	contentType := "text/plain"
+
 	var responseStartLine []byte
 	body := []byte("")
 	userAgent := ""
@@ -75,6 +77,7 @@ func fetchResponse(request request, dirFlag bool, directory string) response {
 					os.Exit(1)
 				}
 				body = fileContents
+				contentType = "application/octet-stream"
 			}
 		}
 
@@ -93,7 +96,7 @@ func fetchResponse(request request, dirFlag bool, directory string) response {
 	return response{
 		Status:      string(responseStartLine),
 		Body:        string(body),
-		HTTPHeaders: []string{"Content-Type: text/plain", "Content-Length: " + contentLengthString},
+		HTTPHeaders: []string{"Content-Type: " + contentType, "Content-Length: " + contentLengthString},
 	}
 }
 
