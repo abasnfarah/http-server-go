@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"go.uber.org/zap"
@@ -31,7 +32,7 @@ func parseHeaders(headers []string) string {
 	return ""
 }
 
-func fetchResponse(request request) response {
+func fetchResponse(request request, dirFlag bool, directory string) response {
 	successful := []byte("HTTP/1.1 200 OK")
 	unSuccessful := []byte("HTTP/1.1 404 Not Found")
 
@@ -51,10 +52,31 @@ func fetchResponse(request request) response {
 		} else {
 			body = []byte("")
 		}
+
 	case strings.HasPrefix(request.Path, "/user-agent"):
 		responseStartLine = successful
 		userAgent = parseHeaders(request.HTTPHeaders)
 		body = []byte(userAgent)
+
+	case strings.HasPrefix(request.Path, "/files"):
+		if dirFlag == false {
+			responseStartLine = unSuccessful
+		} else {
+			filePath, err := filepath.Abs(directory + request.Path[len("/files"):])
+			if err != nil {
+				os.Exit(1)
+			}
+			if _, err := os.Stat(filePath); os.IsNotExist(err) {
+				responseStartLine = unSuccessful
+			} else {
+				responseStartLine = successful
+				fileContents, err := os.ReadFile(filePath)
+				if err != nil {
+					os.Exit(1)
+				}
+				body = fileContents
+			}
+		}
 
 	default:
 		responseStartLine = unSuccessful
@@ -76,14 +98,19 @@ func fetchResponse(request request) response {
 }
 
 type HTTP struct {
-	logger   *zap.Logger
-	Listener net.Listener
+	logger    *zap.Logger
+	Listener  net.Listener
+	directory string
+	dirFlag   bool
 }
 
-func NewHTTPServer() *HTTP {
+func NewHTTPServer(directoryFlagPtr string) *HTTP {
 	logger, _ := zap.NewProduction()
 	logger.Info("Starting HTTP Server")
-	return &HTTP{logger: logger}
+	if directoryFlagPtr == "" {
+		return &HTTP{logger: logger, directory: directoryFlagPtr, dirFlag: false}
+	}
+	return &HTTP{logger: logger, directory: directoryFlagPtr, dirFlag: true}
 }
 
 func (h *HTTP) deserializeRequest(reqBuffer []byte, req *request) {
@@ -148,7 +175,7 @@ func (h *HTTP) handleConnection(conn net.Conn) {
 	var response response
 
 	h.read(conn, &request)
-	response = fetchResponse(request)
+	response = fetchResponse(request, h.dirFlag, h.directory)
 	h.write(conn, response)
 }
 

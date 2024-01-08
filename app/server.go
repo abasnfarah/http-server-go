@@ -1,9 +1,17 @@
 package main
 
-import "github.com/codecrafters-io/http-server-starter-go/app/http"
+import (
+	"flag"
+	"fmt"
+
+	"github.com/codecrafters-io/http-server-starter-go/app/http"
+)
 
 func main() {
-	httpServer := http.NewHTTPServer()
+	directoryFlagPtr := flag.String("directory", "", "")
+	flag.Parse()
+	fmt.Println(*directoryFlagPtr)
+	httpServer := http.NewHTTPServer(*directoryFlagPtr)
 
 	httpServer.ServeRequests("0.0.0.0", "4221")
 }
