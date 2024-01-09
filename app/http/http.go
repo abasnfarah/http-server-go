@@ -48,7 +48,6 @@ func (h *HTTP) deserializeRequest(reqBuffer []byte, req *request) {
 		body = strings.TrimRight(body, "\x00")
 		body = strings.ReplaceAll(body, "\\n", "\n")
 		body = strings.ReplaceAll(body, "\\r", "\r")
-		body += "\r\n"
 		req.Body = body
 	}
 
