@@ -32,22 +32,29 @@ func parseHeaders(headers []string) string {
 	return ""
 }
 
+func createDefaultResponse(request request, responseStartLine, body []byte, contentType string) response {
+	return response{
+		Status:      string(responseStartLine),
+		Body:        string(body),
+		HTTPHeaders: []string{"Content-Type: " + contentType, "Content-Length: " + fmt.Sprint(len(body))},
+	}
+}
+
 func fetchResponse(request request, dirFlag bool, directory string) response {
 	successful := []byte("HTTP/1.1 200 OK")
 	unSuccessful := []byte("HTTP/1.1 404 Not Found")
-
 	contentType := "text/plain"
-
-	var responseStartLine []byte
 	body := []byte("")
 	userAgent := ""
 
+	var responseStartLine []byte
+	var response response
+
 	switch {
 	case request.Path == "/":
-		responseStartLine = successful
+		response = createDefaultResponse(request, successful, body, contentType)
 
 	case strings.HasPrefix(request.Path, "/echo"):
-		responseStartLine = successful
 		body = []byte(request.Path[len("/echo"):])
 		if len(body) > 1 && body[0] == '/' {
 			body = body[1:]
@@ -55,49 +62,39 @@ func fetchResponse(request request, dirFlag bool, directory string) response {
 			body = []byte("")
 		}
 
+		response = createDefaultResponse(request, successful, body, contentType)
+
 	case strings.HasPrefix(request.Path, "/user-agent"):
-		responseStartLine = successful
 		userAgent = parseHeaders(request.HTTPHeaders)
 		body = []byte(userAgent)
 
+		response = createDefaultResponse(request, successful, body, contentType)
+
 	case strings.HasPrefix(request.Path, "/files"):
-		if dirFlag == false {
+		if !dirFlag {
 			responseStartLine = unSuccessful
 		} else {
-			filePath, err := filepath.Abs(directory + request.Path[len("/files"):])
-			if err != nil {
-				os.Exit(1)
-			}
+			filePath, _ := filepath.Abs(directory + request.Path[len("/files"):])
+
 			if _, err := os.Stat(filePath); os.IsNotExist(err) {
 				responseStartLine = unSuccessful
+
 			} else {
 				responseStartLine = successful
-				fileContents, err := os.ReadFile(filePath)
-				if err != nil {
-					os.Exit(1)
-				}
+				fileContents, _ := os.ReadFile(filePath)
 				body = fileContents
 				contentType = "application/octet-stream"
 			}
 		}
 
+		response = createDefaultResponse(request, responseStartLine, body, contentType)
+
 	default:
-		responseStartLine = unSuccessful
+		response = createDefaultResponse(request, unSuccessful, body, contentType)
 
 	}
 
-	var contentLengthString string
-	if len(body) > 0 {
-		contentLengthString = fmt.Sprint(len(body))
-	} else {
-		contentLengthString = "0"
-	}
-
-	return response{
-		Status:      string(responseStartLine),
-		Body:        string(body),
-		HTTPHeaders: []string{"Content-Type: " + contentType, "Content-Length: " + contentLengthString},
-	}
+	return response
 }
 
 type HTTP struct {
