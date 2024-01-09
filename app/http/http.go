@@ -1,107 +1,18 @@
 package http
 
 import (
-	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"go.uber.org/zap"
 )
 
-type request struct {
-	HTTPMethod  string
-	Path        string
-	HTTPVersion string
-	HTTPHeaders []string
-}
-
-type response struct {
-	Status      string
-	HTTPHeaders []string
-	Body        string
-}
-
-func parseHeaders(headers []string) string {
-	for _, header := range headers {
-		if strings.HasPrefix(header, "User-Agent") {
-			return header[len("User-Agent: "):]
-		}
-	}
-	return ""
-}
-
-func createDefaultResponse(request request, responseStartLine, body []byte, contentType string) response {
-	return response{
-		Status:      string(responseStartLine),
-		Body:        string(body),
-		HTTPHeaders: []string{"Content-Type: " + contentType, "Content-Length: " + fmt.Sprint(len(body))},
-	}
-}
-
-func fetchResponse(request request, dirFlag bool, directory string) response {
-	successful := []byte("HTTP/1.1 200 OK")
-	unSuccessful := []byte("HTTP/1.1 404 Not Found")
-	contentType := "text/plain"
-	body := []byte("")
-	userAgent := ""
-
-	var responseStartLine []byte
-	var response response
-
-	switch {
-	case request.Path == "/":
-		response = createDefaultResponse(request, successful, body, contentType)
-
-	case strings.HasPrefix(request.Path, "/echo"):
-		body = []byte(request.Path[len("/echo"):])
-		if len(body) > 1 && body[0] == '/' {
-			body = body[1:]
-		} else {
-			body = []byte("")
-		}
-
-		response = createDefaultResponse(request, successful, body, contentType)
-
-	case strings.HasPrefix(request.Path, "/user-agent"):
-		userAgent = parseHeaders(request.HTTPHeaders)
-		body = []byte(userAgent)
-
-		response = createDefaultResponse(request, successful, body, contentType)
-
-	case strings.HasPrefix(request.Path, "/files"):
-		if !dirFlag {
-			responseStartLine = unSuccessful
-		} else {
-			filePath, _ := filepath.Abs(directory + request.Path[len("/files"):])
-
-			if _, err := os.Stat(filePath); os.IsNotExist(err) {
-				responseStartLine = unSuccessful
-
-			} else {
-				responseStartLine = successful
-				fileContents, _ := os.ReadFile(filePath)
-				body = fileContents
-				contentType = "application/octet-stream"
-			}
-		}
-
-		response = createDefaultResponse(request, responseStartLine, body, contentType)
-
-	default:
-		response = createDefaultResponse(request, unSuccessful, body, contentType)
-
-	}
-
-	return response
-}
-
 type HTTP struct {
-	logger    *zap.Logger
-	Listener  net.Listener
 	directory string
 	dirFlag   bool
+	logger    *zap.Logger
+	listener  net.Listener
 }
 
 func NewHTTPServer(directoryFlagPtr string) *HTTP {
@@ -114,17 +25,31 @@ func NewHTTPServer(directoryFlagPtr string) *HTTP {
 }
 
 func (h *HTTP) deserializeRequest(reqBuffer []byte, req *request) {
+	h.logger.Info("Deserializing request...")
 	requestLine := strings.Split(string(reqBuffer), "\r\n")
 	startLineSections := strings.Split(requestLine[0], " ")
 	req.HTTPMethod = startLineSections[0]
 	req.Path = startLineSections[1]
 	req.HTTPVersion = startLineSections[2]
 
-	for _, header := range requestLine[1:] {
+	var j int
+	for i, header := range requestLine[1:] {
 		if header == "" {
+			j = i + 1
 			break
 		}
 		req.HTTPHeaders = append(req.HTTPHeaders, header)
+	}
+
+	for _, body := range requestLine[j:] {
+		if body == "" {
+			continue
+		}
+		body = strings.TrimRight(body, "\x00")
+		body = strings.ReplaceAll(body, "\\n", "\n")
+		body = strings.ReplaceAll(body, "\\r", "\r")
+		body += "\r\n"
+		req.Body = body
 	}
 
 	h.logger.Info("Deserialized Request: ", zap.Any("request", req))
@@ -140,6 +65,7 @@ func (h *HTTP) serializeResponse(res response) []byte {
 	response += "\r\n"
 	if len(res.Body) > 0 {
 		response += res.Body
+		response += "\r\n"
 	}
 	return []byte(response)
 }
@@ -175,7 +101,13 @@ func (h *HTTP) handleConnection(conn net.Conn) {
 	var response response
 
 	h.read(conn, &request)
-	response = fetchResponse(request, h.dirFlag, h.directory)
+
+	if request.HTTPMethod == "GET" {
+		response = fetchGETResponse(request, h.dirFlag, h.directory)
+	} else if request.HTTPMethod == "POST" {
+		response = fetchPOSTResponse(request, h.dirFlag, h.directory)
+	}
+
 	h.write(conn, response)
 }
 
@@ -186,9 +118,9 @@ func (h *HTTP) ServeRequests(ip string, port string) {
 		os.Exit(1)
 	}
 
-	h.Listener = l
+	h.listener = l
 	for {
-		c, err := h.Listener.Accept()
+		c, err := h.listener.Accept()
 		if err != nil {
 			h.logger.Error("Error accepting connection: " + err.Error())
 			continue
