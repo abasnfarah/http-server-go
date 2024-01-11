@@ -1,38 +1,67 @@
-[![progress-banner](https://backend.codecrafters.io/progress/http-server/52a0cc79-917b-4df8-844f-d1580f585921)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# Http-Server-Go
 
-This is a starting point for Go solutions to the
-["Build Your Own HTTP server" Challenge](https://app.codecrafters.io/courses/http-server/overview).
+This is my implementation of the ["Build Your Own HTTP server" Challenge](https://app.codecrafters.io/courses/http-server/overview) from [Codecrafters.io](https://app.codecrafters.io).
 
 [HTTP](https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol) is the
-protocol that powers the web. In this challenge, you'll build a HTTP/1.1 server
-that is capable of serving multiple clients.
+protocol that powers the web. In this challenge, I build a HTTP/1.1 server
+that is capable of serving multiple clients. I can only use networking for TCP and not HTTP packages. 
 
-Along the way you'll learn about TCP servers,
-[HTTP request syntax](https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html),
+I refreshed my understanding about TCP [HTTP request syntax](https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html),
 and more.
 
-**Note**: If you're viewing this repo on GitHub, head over to
+**Note**: To try to implement this yourself in your language of choice, head over to
 [codecrafters.io](https://codecrafters.io) to try the challenge.
 
-# Passing the first stage
+# Design
 
-The entry point for your HTTP server implementation is in `app/server.go`. Study
-and uncomment the relevant code, and push your changes to pass the first stage:
+The entry point for the HTTP server implementation is in `app/server.go`.
 
-```sh
-git add .
-git commit -m "pass 1st stage" # any msg
-git push origin master
+## Types
+
+### HTTP server
+
+```go
+type HTTP struct {
+	directory string
+	dirFlag   bool
+	logger    *zap.Logger
+	listener  net.Listener
+}
 ```
 
-Time to move on to the next stage!
+* The server utilized [uber/zap](https://github.com/uber-go/zap) to have structured logging.
+* Go provides a builtin [net](https://pkg.go.dev/net) package for handling TCP connections.
 
-# Stage 2 & beyond
+### Request and Response
 
-Note: This section is for stages 2 and beyond.
+```go
+const (
+	SUCCESSFUL_GET  = "HTTP/1.1 200 OK"
+	SUCCESSFUL_POST = "HTTP/1.1 201 OK"
+	FAILED_GET      = "HTTP/1.1 404 Not Found"
+	FAILED_POST     = "HTTP/1.1 404 Not Found"
+)
 
-1. Ensure you have `go (1.19)` installed locally
-1. Run `./your_server.sh` to run your program, which is implemented in
-   `app/server.go`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+type request struct {
+	Body        string
+	HTTPMethod  string
+	HTTPVersion string
+	HTTPHeaders []string
+	Path        string
+}
+
+type response struct {
+	Body        string
+	HTTPHeaders []string
+	Status      string
+}
+```
+
+
+The HTTP type doesn't maintain any state for the responses. This allows us to handle multiple connections to our server concurrently. 
+
+# Over All Thoughts On Challenge
+
+This was a very fun challenge. Obviously my implementation isn't a full implementation. However I had fun writing this out.
+
+I think this code can be useful for anyone else trying the challenge themselves and looking to compare approaches to get better. Feel free to open any PR's if you would want to add to this implementation.
